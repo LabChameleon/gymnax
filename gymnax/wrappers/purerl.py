@@ -39,7 +39,7 @@ class FlattenObservationWrapper(GymnaxWrapper):
             dtype=self._env.observation_space(params).dtype,
         )
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "params"))
     def reset(
         self, key: jax.Array, params: environment.EnvParams | None = None
     ) -> tuple[jax.Array, environment.EnvState]:
@@ -47,7 +47,7 @@ class FlattenObservationWrapper(GymnaxWrapper):
         obs = jnp.reshape(obs, (-1,))
         return obs, state
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "params"))
     def step(
         self,
         key: jax.Array,
@@ -75,7 +75,7 @@ class LogWrapper(GymnaxWrapper):
     #   def __init__(self, env: environment.Environment):
     #     super().__init__(env)
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "params"))
     def reset(
         self, key: jax.Array, params: environment.EnvParams | None = None
     ) -> tuple[jax.Array, LogEnvState]:
@@ -83,7 +83,7 @@ class LogWrapper(GymnaxWrapper):
         state = LogEnvState(env_state, 0, 0, 0, 0)
         return obs, state
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "params"))
     def step(
         self,
         key: jax.Array,

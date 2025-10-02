@@ -1,6 +1,8 @@
 """JAX implementation of CartPole-v1 OpenAI gym environment."""
 
 from typing import Any
+from functools import partial
+import math
 
 import jax
 import jax.numpy as jnp
@@ -20,6 +22,8 @@ class EnvState(environment.EnvState):
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
+    fourier_features: bool = False
+    fourier_order: int = 3  # Only used if fourier_features is True
     gravity: float = 9.8
     masscart: float = 1.0
     masspole: float = 0.1
@@ -28,7 +32,7 @@ class EnvParams(environment.EnvParams):
     polemass_length: float = 0.05  # (masspole * length)
     force_mag: float = 10.0
     tau: float = 0.02
-    theta_threshold_radians: float = 12 * 2 * jnp.pi / 360
+    theta_threshold_radians: float = 12 * 2 * math.pi / 360
     x_threshold: float = 2.4
     max_steps_in_episode: int = 500  # v0 had only 200 steps!
 
@@ -42,13 +46,13 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
 
     def __init__(self):
         super().__init__()
-        self.obs_shape = (4,)
 
     @property
     def default_params(self) -> EnvParams:
         # Default environment parameters for CartPole-v1
         return EnvParams()
 
+    @partial(jax.jit, static_argnames=("self", "params"))
     def step_env(
         self,
         key: jax.Array,
@@ -91,13 +95,14 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
         done = self.is_terminal(state, params)
 
         return (
-            jax.lax.stop_gradient(self.get_obs(state)),
+            jax.lax.stop_gradient(self.get_obs(state, params)),
             jax.lax.stop_gradient(state),
             jnp.array(reward),
             done,
             {"discount": self.discount(state, params)},
         )
 
+    @partial(jax.jit, static_argnames=("self", "params",))
     def reset_env(
         self, key: jax.Array, params: EnvParams
     ) -> tuple[jax.Array, EnvState]:
@@ -110,12 +115,38 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
             theta_dot=init_state[3],
             time=0,
         )
-        return self.get_obs(state), state
+        return self.get_obs(state, params), state
 
+
+    @partial(jax.jit, static_argnames=("self", "params",))
     def get_obs(self, state: EnvState, params=None, key=None) -> jax.Array:
-        """Applies observation function to state."""
-        return jnp.array([state.x, state.x_dot, state.theta, state.theta_dot])
 
+        obs = jnp.array([state.x, state.x_dot, state.theta, state.theta_dot])
+
+        if not params.fourier_features:
+            return obs
+
+        obs = jnp.array([state.x, state.x_dot, state.theta, state.theta_dot])
+        x_thr, th_thr = params.x_threshold, params.theta_threshold_radians
+        low = jnp.array([-x_thr, -3.0, -th_thr, -3.0])
+        high = jnp.array([x_thr,  3.0,  th_thr,  3.0])
+
+        obs_clipped = jnp.clip(obs, low, high)
+        s_norm = (obs_clipped - low) / (high - low)
+
+        orders = (params.fourier_order,) * 4
+        coeffs = jnp.array(
+            jnp.array(jax.numpy.stack(jnp.meshgrid(
+                *[jnp.arange(o + 1) for o in orders], indexing="ij"
+            )).reshape(len(orders), -1).T)
+        )
+
+        dot = coeffs @ s_norm
+        features = jnp.cos(jnp.pi * dot)
+
+        return features
+
+    @partial(jax.jit, static_argnames=("self", "params",))
     def is_terminal(self, state: EnvState, params: EnvParams) -> jax.Array:
         """Check whether state is terminal."""
         # Check termination criteria
@@ -149,16 +180,21 @@ class CartPole(environment.Environment[EnvState, EnvParams]):
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space of the environment."""
-        high = jnp.array(
-            [
-                params.x_threshold * 2,
-                jnp.finfo(jnp.float32).max,
-                params.theta_threshold_radians * 2,
-                jnp.finfo(jnp.float32).max,
-            ]
-        )
-        return spaces.Box(-high, high, (4,), dtype=jnp.float32)
+        if not params.fourier_features:
+            high = jnp.array(
+                [
+                    params.x_threshold * 2,
+                    jnp.finfo(jnp.float32).max,
+                    params.theta_threshold_radians * 2,
+                    jnp.finfo(jnp.float32).max,
+                ]
+            )
+            return spaces.Box(-high, high, (4,), dtype=jnp.float32)
+        else:
+            num_features = (params.fourier_order + 1) ** 4
+            return spaces.Box(-1.0, 1.0, (num_features,), dtype=jnp.float32)
 
+    @partial(jax.jit, static_argnames=("self", "params",))
     def state_space(self, params: EnvParams) -> spaces.Dict:
         """State space of the environment."""
         high = jnp.array(

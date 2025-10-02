@@ -32,7 +32,7 @@ class Environment(Generic[TEnvState, TEnvParams]):
     def default_params(self) -> EnvParams:
         return EnvParams()
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "params"))
     def step(
         self,
         key: jax.Array,
@@ -59,7 +59,7 @@ class Environment(Generic[TEnvState, TEnvParams]):
 
         return obs, state, reward, done, info
 
-    @partial(jax.jit, static_argnames=("self",))
+    @partial(jax.jit, static_argnames=("self", "params"))
     def reset(
         self, key: jax.Array, params: TEnvParams | None = None
     ) -> tuple[jax.Array, TEnvState]:
@@ -72,6 +72,7 @@ class Environment(Generic[TEnvState, TEnvParams]):
 
         return obs, state
 
+    @partial(jax.jit, static_argnames=("self", "params"))
     def step_env(
         self,
         key: jax.Array,
@@ -82,6 +83,7 @@ class Environment(Generic[TEnvState, TEnvParams]):
         """Environment-specific step transition."""
         raise NotImplementedError
 
+    @partial(jax.jit, static_argnames=("self", "params"))
     def reset_env(
         self, key: jax.Array, params: TEnvParams
     ) -> tuple[jax.Array, TEnvState]:
